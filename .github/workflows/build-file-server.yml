@@ -1,0 +1,101 @@
+name: Build AINow File Server
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+            artifact: ainow-file-server-linux
+          - os: macos-latest
+            name: macos
+            artifact: ainow-file-server-macos
+          - os: windows-latest
+            name: windows
+            artifact: ainow-file-server-windows.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r local_file_server/requirements.txt
+
+      - name: Build binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          chmod +x build_binary.sh
+          ./build_binary.sh
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          ./build_binary.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | head -20
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "AINow File Server ${{ github.ref_name }}"
+          body: |
+            ## AINow File Server ${{ github.ref_name }}
+
+            Desktop app for sharing local files with your AI agent.
+
+            ### Download
+            | OS | File |
+            |----|------|
+            | Linux | `ainow-file-server-linux` |
+            | macOS | `ainow-file-server-macos` |
+            | Windows | `ainow-file-server-windows.exe` |
+
+            ### Usage
+            1. Download the file for your OS
+            2. Run the app
+            3. Select a folder to share
+            4. Click **Start**
+            5. Go to AINow → Agents → Chat → click 📎 to attach files
+          files: |
+            artifacts/**/*
+          draft: false
+          prerelease: false
