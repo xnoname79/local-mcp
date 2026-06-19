@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI, Query, Header, HTTPException
+from fastapi import FastAPI, Query, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -9,14 +9,39 @@ from .config import get_or_create_token, TOKEN_HEADER
 
 app = FastAPI(title="AINow File Server")
 
-# CORS — chỉ cho phép origin của AINow (web + dev). KHÔNG dùng "*" nữa: server này
-# chạy ở localhost máy user, mở toác = bất kỳ web nào cũng gọi được action endpoint.
+# CORS — chỉ cho phép origin của AINow (web + dev). KHÔNG dùng "*": server này chạy ở
+# localhost máy user, mở toác = bất kỳ web nào cũng gọi được action endpoint.
+# Cho cả getainow.site và getainow.io (+ subdomain), và localhost cho dev.
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https://([a-z0-9-]+\.)*getainow\.site$|^http://(localhost|127\.0\.0\.1):\d+$",
-    allow_methods=["GET", "POST"],
+    allow_origin_regex=r"^https://([a-z0-9-]+\.)*getainow\.(site|io)$|^http://(localhost|127\.0\.0\.1):\d+$",
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", TOKEN_HEADER],
 )
+
+
+# ── Private Network Access (PNA) ──────────────────────────────────────────────
+# Chrome chặn trang PUBLIC https (getainow.site) gọi xuống LOOPBACK (localhost:8765)
+# với lỗi: "Permission was denied ... to access the `loopback` address space".
+# Đây KHÔNG phải CORS allowlist — là cơ chế bảo mật mới của Chrome. Trước request
+# thật, Chrome gửi preflight OPTIONS kèm header:
+#     Access-Control-Request-Private-Network: true
+# Server PHẢI đáp lại `Access-Control-Allow-Private-Network: true` thì mới qua.
+# CORSMiddleware không tự thêm header này.
+#
+# Lưu ý THỨ TỰ: middleware thêm SAU thì chạy NGOÀI CÙNG (bọc ngoài CORS). Phải để
+# PNA ở đây (sau add_middleware CORS) để nó chạy ngoài cùng — bồi header PNA vào
+# response cuối, kể cả response preflight do CORSMiddleware tự sinh ra.
+@app.middleware("http")
+async def allow_private_network(request: Request, call_next):
+    is_pna_preflight = (
+        request.method == "OPTIONS"
+        and request.headers.get("access-control-request-private-network") == "true"
+    )
+    response = await call_next(request)
+    if is_pna_preflight:
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 # Token bí mật bảo vệ action endpoint. Sinh 1 lần, lưu trong ~/.ainow-file-server.json.
 _TOKEN = get_or_create_token()
