@@ -2,7 +2,6 @@
 AINow File Server — Desktop GUI
 Cross-platform Tkinter app. User chọn folder → Start → server chạy background.
 """
-import json
 import logging
 import os
 import sys
@@ -12,24 +11,12 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, scrolledtext
 
-CONFIG_FILE = os.path.join(Path.home(), ".ainow-file-server.json")
+# Config + token dùng chung với server.py (cùng file ~/.ainow-file-server.json).
+# Dùng absolute import vì gui.py là entry-point của PyInstaller (chạy như __main__,
+# không có parent package → relative import ".config" sẽ lỗi). Giống launcher.py.
+from local_file_server.config import load_config, save_config, get_or_create_token
+
 DEFAULT_PORT = 8765
-
-
-def load_config() -> dict:
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def save_config(data: dict):
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
 
 
 class LogHandler(logging.Handler):
@@ -58,6 +45,8 @@ class AINowFileServerApp:
 
         config = load_config()
         self.last_folder = config.get("root_dir", str(Path.home()))
+        # Token bảo vệ action endpoint — sinh/đọc 1 lần, user copy dán vào AINow.
+        self.token = get_or_create_token()
 
         self._build_ui()
         self._apply_theme()
@@ -73,20 +62,25 @@ class AINowFileServerApp:
 
         self.root.configure(bg=bg)
 
-        for widget in [self.title_label, self.folder_label, self.status_label, self.log_label]:
+        for widget in [self.title_label, self.folder_label, self.token_label,
+                       self.status_label, self.log_label]:
             widget.configure(bg=bg, fg=fg)
 
         self.folder_entry.configure(bg=entry_bg, fg=fg, insertbackground=fg)
+        self.token_entry.configure(
+            bg=entry_bg, fg=fg, insertbackground=fg, readonlybackground=entry_bg,
+        )
         self.log_text.configure(bg=log_bg, fg="#a0d0a0", insertbackground=fg)
 
         self.browse_btn.configure(bg=btn_bg, fg=btn_fg, activebackground=accent)
+        self.copy_btn.configure(bg=btn_bg, fg=btn_fg, activebackground=accent)
         self.start_btn.configure(bg="#1b7a3d", fg=btn_fg, activebackground="#22a34a")
         self.stop_btn.configure(bg="#8b2020", fg=btn_fg, activebackground="#b03030")
 
         self.status_dot.configure(bg=bg)
 
-        for frame in [self.top_frame, self.folder_frame, self.status_frame,
-                       self.btn_frame, self.log_frame]:
+        for frame in [self.top_frame, self.folder_frame, self.token_frame,
+                       self.status_frame, self.btn_frame, self.log_frame]:
             frame.configure(bg=bg)
 
     def _build_ui(self):
@@ -117,6 +111,30 @@ class AINowFileServerApp:
         )
         self.browse_btn.pack(side="right", padx=(6, 0))
         entry_row.configure(bg=self.root.cget("bg"))
+
+        # Token — user copy dán vào AINow để bật action (mở web / ghi note)
+        self.token_frame = tk.Frame(self.root)
+        self.token_frame.pack(fill="x", padx=12, pady=4)
+        self.token_label = tk.Label(
+            self.token_frame,
+            text="Access Token (dán vào AINow để bật mở web / ghi note):",
+            font=("Helvetica", 10),
+        )
+        self.token_label.pack(anchor="w")
+
+        token_row = tk.Frame(self.token_frame)
+        token_row.pack(fill="x", pady=(4, 0))
+        self.token_entry = tk.Entry(token_row, font=("Courier", 9))
+        self.token_entry.pack(side="left", fill="x", expand=True)
+        self.token_entry.insert(0, self.token)
+        self.token_entry.configure(state="readonly")
+
+        self.copy_btn = tk.Button(
+            token_row, text=" Copy ", command=self._copy_token,
+            font=("Helvetica", 9),
+        )
+        self.copy_btn.pack(side="right", padx=(6, 0))
+        token_row.configure(bg=self.root.cget("bg"))
 
         # Status
         self.status_frame = tk.Frame(self.root)
@@ -183,6 +201,11 @@ class AINowFileServerApp:
             self.folder_entry.delete(0, "end")
             self.folder_entry.insert(0, folder)
 
+    def _copy_token(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.token)
+        self._log("Token đã được copy — dán vào AINow để bật action.")
+
     def _start_server(self):
         folder = self.folder_entry.get().strip()
         if not folder or not os.path.isdir(folder):
@@ -190,7 +213,10 @@ class AINowFileServerApp:
             return
 
         os.environ["ROOT_DIR"] = folder
-        save_config({"root_dir": folder, "port": DEFAULT_PORT})
+        # Merge để KHÔNG ghi đè mất token đã lưu trong config.
+        config = load_config()
+        config.update({"root_dir": folder, "port": DEFAULT_PORT})
+        save_config(config)
 
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")

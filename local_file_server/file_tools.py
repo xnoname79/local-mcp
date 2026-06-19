@@ -16,6 +16,13 @@ def _safe_resolve(root_dir: str, sub_path: str) -> Path:
     return target
 
 
+def _is_text_extractable(entry: Path) -> bool:
+    """Chỉ chấp nhận file có parser trích xuất được text (txt, md, csv, pdf, docx,
+    xlsx, code...). Loại ảnh, file nén, binary — những thứ không lấy ra text được.
+    PARSERS là nguồn sự thật duy nhất (đồng bộ với read_file)."""
+    return entry.suffix.lower() in PARSERS
+
+
 def list_files(
     root_dir: str, sub_path: str = "", recursive: bool = False
 ) -> list[dict]:
@@ -32,6 +39,9 @@ def list_files(
             if count >= MAX_FILES_LIST:
                 break
             if entry.name.startswith("."):
+                continue
+            # Ẩn file không trích xuất được text (ảnh, file nén, binary). Vẫn giữ thư mục.
+            if entry.is_file() and not _is_text_extractable(entry):
                 continue
             rel = str(entry.relative_to(Path(root_dir).resolve()))
             stat = entry.stat()
@@ -51,6 +61,9 @@ def list_files(
             if count >= MAX_FILES_LIST:
                 break
             if entry.name.startswith("."):
+                continue
+            # Ẩn file không trích xuất được text (ảnh, file nén, binary). Vẫn giữ thư mục.
+            if entry.is_file() and not _is_text_extractable(entry):
                 continue
             rel = str(entry.relative_to(Path(root_dir).resolve()))
             stat = entry.stat()
