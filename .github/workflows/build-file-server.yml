@@ -14,7 +14,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          # Pin Ubuntu 22.04 (GLIBC 2.35) thay vì ubuntu-latest (24.04, GLIBC 2.39).
+          # PyInstaller KHÔNG bundle GLIBC. Build trên GLIBC cũ → chạy được trên distro
+          # mới; build trên GLIBC mới → user GLIBC cũ bị "GLIBC_2.38 not found". 22.04
+          # phủ rộng nhất (chạy được cả 22.04, 24.04 trở lên).
+          - os: ubuntu-22.04
             name: linux
             artifact: ainow-file-server-linux
           - os: macos-latest
